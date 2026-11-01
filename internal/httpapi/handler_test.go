@@ -97,11 +97,14 @@ func TestRequestUpdate_BadBody(t *testing.T) {
 	}}
 
 	tests := map[string]string{
-		"not json":      `pair=EUR/MXN`,
-		"empty body":    ``,
-		"unknown field": `{"pair":"EUR/MXN","extra":1}`,
-		"wrong type":    `{"pair":42}`,
-		"too large":     `{"pair":"` + strings.Repeat("A", 2048) + `"}`,
+		"not json":       `pair=EUR/MXN`,
+		"empty body":     ``,
+		"unknown field":  `{"pair":"EUR/MXN","extra":1}`,
+		"wrong type":     `{"pair":42}`,
+		"too large":      `{"pair":"` + strings.Repeat("A", 2048) + `"}`,
+		"second json":    `{"pair":"EUR/MXN"}{"extra":true}`,
+		"trailing junk":  `{"pair":"EUR/MXN"}garbage`,
+		"oversized tail": `{"pair":"EUR/MXN"}` + strings.Repeat(" ", 2048),
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
