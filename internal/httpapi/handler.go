@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -154,9 +155,23 @@ func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error)
 // decodeJSON читает тело запроса в v: ограничивает размер и не пропускает неизвестные поля.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	return dec.Decode(v)
+
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return errors.New("request body must contain exactly one JSON value")
+	}
+
+	return nil
 }
 
 type errorResponse struct {
