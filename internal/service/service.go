@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
@@ -55,25 +57,7 @@ func (s *Service) LatestQuote(ctx context.Context, rawPair string) (domain.Quote
 	return s.repo.LatestQuote(ctx, pair)
 }
 
-// isUUID проверяет формат xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
-// Без этой проверки кривой id дошёл бы до базы и вернул бы оттуда ошибку формата.
+// isUUID проверяет корректность UUID и требует запись из 36 символов с дефисами.
 func isUUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch i {
-		case 8, 13, 18, 23:
-			if c != '-' {
-				return false
-			}
-		default:
-			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
-			if !isHex {
-				return false
-			}
-		}
-	}
-	return true
+	return len(s) == 36 && uuid.Validate(s) == nil
 }
