@@ -19,9 +19,12 @@ type Job struct {
 }
 
 // Queue объявляется потребителем — пакетом воркера.
-// found=false и err=nil означают отсутствие доступной работы.
+// В ClaimNext found=false без ошибки означает отсутствие доступной работы.
+// В Complete saved=false без ошибки означает, что запись не принадлежит попытке
+// либо уже не находится в processing.
 type Queue interface {
 	ClaimNext(ctx context.Context, maxAttempts int, lease time.Duration) (job Job, found bool, err error)
+	Complete(ctx context.Context, job Job, price decimal.Decimal, provider string) (saved bool, err error)
 }
 
 // Quoter — операции, которые воркеру нужны от клиента провайдера.
