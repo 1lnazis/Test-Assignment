@@ -19,6 +19,16 @@ import (
 // Без TEST_DATABASE_URL интеграционные тесты пропускаются.
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
+	pool := newTestPoolBeforeMigrations(t)
+	if err := Migrate(context.Background(), pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return pool
+}
+
+// newTestPoolBeforeMigrations создаёт изолированную схему для проверки обновления БД.
+func newTestPoolBeforeMigrations(t *testing.T) *pgxpool.Pool {
+	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL не задан, интеграционный тест пропущен")
@@ -53,15 +63,20 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	return pool
 }
 
 func TestMigrate_Idempotent(t *testing.T) {
 	pool := newTestPool(t)
 	ctx := context.Background()
+
+	var before int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before == 0 {
+		t.Fatal("newTestPool did not apply migrations")
+	}
 
 	// newTestPool уже применил миграции, повторный запуск ничего не должен ломать.
 	if err := Migrate(ctx, pool); err != nil {
@@ -72,8 +87,8 @@ func TestMigrate_Idempotent(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("schema_migrations rows = %d, want 1", n)
+	if n != before {
+		t.Fatalf("schema_migrations rows = %d after second run, want %d", n, before)
 	}
 }
 
