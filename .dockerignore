@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+.DS_Store
+/app
+/bin/
+*.test
+*.out
+coverage.*
+.env*
+!.env.example
+Dockerfile
+docker-compose*.yml
+dockerignore

@@ -28,6 +28,9 @@ go.work.sum
 # env file
 .env
 
+# Local application binary produced by go build ./cmd/app
+/app
+
 # Editor/IDE
 # .idea/
 # .vscode/
