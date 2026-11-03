@@ -21,7 +21,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Только в тесте убираем ожидание retry; сам UPDATE выполняется настоящим Repo.
 type observedQueue struct {
 	*Repo
 	terminal chan error

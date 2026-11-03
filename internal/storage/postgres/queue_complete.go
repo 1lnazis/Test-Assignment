@@ -8,17 +8,11 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Complete сохраняет результат только для текущей processing-попытки.
-// saved=false без ошибки означает, что запись уже завершена, отсутствует
-// или после перезахвата принадлежит другой попытке.
 func (r *Repo) Complete(ctx context.Context, job worker.Job, price decimal.Decimal, provider string) (saved bool, err error) {
 	if job.Attempts <= 0 {
 		return false, fmt.Errorf("complete job: attempt must be positive")
 	}
 
-	// numeric(24,10): 14 цифр до запятой и 10 после. Проверяем уже округлённое
-	// значение: маленькая положительная цена может округлиться до нуля,
-	// а значение у верхней границы — выйти за диапазон колонки.
 	price = price.Round(10)
 	if !price.IsPositive() || price.GreaterThanOrEqual(decimal.New(1, 14)) {
 		return false, fmt.Errorf("complete job: rounded price must be positive and less than 100000000000000")

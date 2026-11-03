@@ -12,7 +12,6 @@ import (
 
 type runner interface{ Run(context.Context) error }
 
-// runServices владеет обеими горутинами и возвращается после их завершения.
 func runServices(ctx context.Context, srv *http.Server, listener net.Listener, background runner, timeout time.Duration, log *slog.Logger) error {
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
@@ -42,7 +41,7 @@ func runServices(ctx context.Context, srv *http.Server, listener net.Listener, b
 	}
 	log.Info("shutting down")
 	cancelWorker()
-	// Один дедлайн на остановку HTTP и ожидание воркера.
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -62,8 +61,7 @@ func runServices(ctx context.Context, srv *http.Server, listener net.Listener, b
 			}
 		case <-shutdownCtx.Done():
 			result = errors.Join(result, fmt.Errorf("worker shutdown: %w", shutdownCtx.Err()))
-			// Go не позволяет принудительно убить горутину. Зависимости воркера
-			// обязаны учитывать контекст; пул нельзя закрывать до их завершения.
+
 			if err := <-workerDone; err != nil {
 				result = errors.Join(result, fmt.Errorf("worker: %w", err))
 			}

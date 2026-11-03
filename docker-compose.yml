@@ -5,7 +5,6 @@ services:
       POSTGRES_USER: quotes
       POSTGRES_PASSWORD: quotes
       POSTGRES_DB: quotes
-    # Порт БД на хост не публикуется. app и test используют db:5432.
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -38,10 +37,8 @@ services:
     ports:
       - "${APP_PORT:-8080}:8080"
     restart: on-failure
-    # Запас сверх штатного SHUTDOWN_TIMEOUT перед принудительным завершением.
     stop_grace_period: ${STOP_GRACE_PERIOD:-20s}
 
-  # В обычный up не входит. Запускается адресно через compose run --rm test.
   test:
     profiles: [tools]
     build:

@@ -12,17 +12,14 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// Repo — репозиторий запросов на обновление и котировок.
 type Repo struct {
 	pool *pgxpool.Pool
 }
 
-// NewRepo создаёт репозиторий поверх пула соединений.
 func NewRepo(pool *pgxpool.Pool) *Repo {
 	return &Repo{pool: pool}
 }
 
-// CreateUpdate сохраняет новый запрос на обновление пары со статусом pending.
 func (r *Repo) CreateUpdate(ctx context.Context, pair domain.Pair) (domain.Update, error) {
 	const q = `
 		INSERT INTO quote_updates (base, quote, status)
@@ -39,7 +36,6 @@ func (r *Repo) CreateUpdate(ctx context.Context, pair domain.Pair) (domain.Updat
 	return u, nil
 }
 
-// GetUpdate возвращает запрос по идентификатору или domain.ErrNotFound.
 func (r *Repo) GetUpdate(ctx context.Context, id string) (domain.Update, error) {
 	const q = `
 		SELECT id::text, base, quote, status, price::text, provider, error, created_at, updated_at
@@ -79,8 +75,6 @@ func (r *Repo) GetUpdate(ctx context.Context, id string) (domain.Update, error) 
 	return u, nil
 }
 
-// LatestQuote возвращает последнюю котировку по паре среди выполненных запросов
-// или domain.ErrNotFound, если выполненных запросов ещё не было.
 func (r *Repo) LatestQuote(ctx context.Context, pair domain.Pair) (domain.Quote, error) {
 	const q = `
 		SELECT price::text, COALESCE(provider, ''), updated_at

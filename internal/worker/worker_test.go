@@ -169,7 +169,7 @@ func TestWorker_ApplicationCancellationLeavesLease(t *testing.T) {
 	})
 	if err := w.Run(ctx); err != nil {
 		t.Fatal(err)
-	} // Любая попытка записи вернула бы unexpected ...
+	}
 }
 
 func TestWorker_ObtainedPriceSavedAfterCancellation(t *testing.T) {

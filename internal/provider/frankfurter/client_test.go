@@ -12,8 +12,6 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// Подменяем только HTTP-транспорт: запросы и ответы проходят через http.Client,
-// но для тестов не нужны интернет и работающий Frankfurter.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

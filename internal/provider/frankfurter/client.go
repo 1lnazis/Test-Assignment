@@ -1,4 +1,3 @@
-// Package frankfurter получает котировки из HTTP API Frankfurter v2.
 package frankfurter
 
 import (
@@ -18,15 +17,11 @@ import (
 const DefaultBaseURL = "https://api.frankfurter.dev"
 const maxResponseBytes = 64 << 10
 
-// Client хранит настройки и переиспользуемый HTTP-клиент.
-// Создаётся через New; допускает одновременные вызовы Fetch.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
-// New проверяет настройки и создаёт клиент. timeout должен быть положительным.
-// baseURL включает схему и хост, например https://api.frankfurter.dev.
 func New(baseURL string, timeout time.Duration) (*Client, error) {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
@@ -45,20 +40,14 @@ func New(baseURL string, timeout time.Duration) (*Client, error) {
 	}, nil
 }
 
-// Name возвращает имя провайдера для сохранения вместе с результатом джобы.
 func (c *Client) Name() string { return "frankfurter" }
 
-// rateResponse содержит используемые поля ответа провайдера.
-// json.Number сохраняет числовую запись без промежуточного float64.
 type rateResponse struct {
 	Base  string      `json:"base"`
 	Quote string      `json:"quote"`
 	Rate  json.Number `json:"rate"`
 }
 
-// Fetch выполняет одну попытку получения цены: сколько Quote стоит одна Base.
-// Ретраями управляет вызывающий код. Дата курса провайдера не подменяет
-// updated_at нашей записи: время сохранения установит слой работы с БД.
 func (c *Client) Fetch(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	base, err := domain.ParseCurrency(string(pair.Base))
 	if err != nil {
@@ -86,7 +75,6 @@ func (c *Client) Fetch(ctx context.Context, pair domain.Pair) (decimal.Decimal, 
 	}
 	defer resp.Body.Close()
 
-	// Дополнительный байт позволяет обнаружить превышение лимита.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("frankfurter: read response: %w", err)
@@ -98,13 +86,13 @@ func (c *Client) Fetch(ctx context.Context, pair domain.Pair) (decimal.Decimal, 
 		var apiError struct {
 			Message string `json:"message"`
 		}
-		// Например, прокси может прислать HTML. Статус сохраняем и в этом случае.
+
 		_ = json.Unmarshal(body, &apiError)
 		return decimal.Zero, &HTTPError{StatusCode: resp.StatusCode, Message: apiError.Message}
 	}
 
 	var data rateResponse
-	// Unmarshal проверяет всё тело, включая лишние данные после первого JSON.
+
 	if err := json.Unmarshal(body, &data); err != nil {
 		return decimal.Zero, fmt.Errorf("frankfurter: decode response: %w", err)
 	}
@@ -122,8 +110,6 @@ func (c *Client) Fetch(ctx context.Context, pair domain.Pair) (decimal.Decimal, 
 	return price, nil
 }
 
-// HTTPError сохраняет HTTP-статус и сообщение внешнего API.
-// Доступ к полям ошибки можно получить через errors.As.
 type HTTPError struct {
 	StatusCode int
 	Message    string
@@ -137,8 +123,6 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("frankfurter: HTTP %d: %s", e.StatusCode, message)
 }
 
-// Retryable сообщает, допускает ли HTTP-ошибка повторную попытку.
-// Сам по себе вызов этого метода никаких запросов не выполняет.
 func (e *HTTPError) Retryable() bool {
 	return e.StatusCode == http.StatusRequestTimeout ||
 		e.StatusCode == http.StatusTooManyRequests ||
