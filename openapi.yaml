@@ -1,0 +1,492 @@
+openapi: 3.0.3
+info:
+  title: Сервис валютных котировок
+  version: 1.0.0
+  description: |
+    Сервис принимает запрос обновления, сохраняет джобу и получает курс в фоне.
+    Создание джобы не гарантирует успешное получение котировки у провайдера.
+    Каждый POST создаёт отдельный запрос; идемпотентность пока не реализована.
+
+    Валютная пара EUR/MXN означает цену одной EUR в MXN. Допустимые коды
+    задаются CURRENCIES; по умолчанию USD, EUR, MXN, RUB, KZT. Допуск валюты
+    сервисом не гарантирует поддержку пары внешним источником.
+
+    Результат по ID рекомендуется проверять не чаще одного раза в секунду.
+    Это договорённость с клиентом, серверного ограничения частоты нет.
+    pending и processing означают, что результата пока нет. failed означает
+    окончательную ошибку: постоянный отказ либо исчерпание попыток.
+
+    Цена передаётся десятичной строкой. updated_at у успешной котировки —
+    время её сохранения нашим сервисом по часам БД, а не дата курса источника.
+    Новое обновление может получить тот же курс.
+
+    Ошибки описанных ручек возвращаются в JSON. Неизвестный путь возвращает
+    стандартный текстовый 404 Go ServeMux; неподдерживаемый метод — текстовый
+    405 с заголовком Allow. GET-маршруты также обслуживают HEAD без тела ответа.
+servers:
+  - url: http://localhost:{port}
+    description: Локальный API; port соответствует APP_PORT при запуске Compose.
+    variables:
+      port:
+        default: '8080'
+        description: Опубликованный порт API.
+tags:
+  - name: updates
+    description: Создание джобы и чтение её состояния.
+  - name: quotes
+    description: Чтение последней успешно сохранённой котировки.
+paths:
+  /api/v1/quotes/updates:
+    post:
+      tags: [updates]
+      operationId: requestUpdate
+      summary: Запросить обновление котировки
+      description: |
+        Проверяет валютную пару, сохраняет pending-джобу и возвращает её ID.
+        Хендлер ждёт запись в БД, но не обращается к внешнему провайдеру.
+        Обновление выполняет воркер. Для чтения результата используется ID
+        или относительный адрес из Location.
+
+        Тело должно содержать один JSON-объект без неизвестных полей и данных
+        после него. Максимальный размер тела — 1024 байта, включая пробелы.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRequest'
+            example:
+              pair: EUR/MXN
+      responses:
+        '202':
+          description: Джоба сохранена; результат обновления можно читать отдельно.
+          headers:
+            Location:
+              description: Относительный адрес чтения этой джобы.
+              schema:
+                type: string
+                example: /api/v1/quotes/updates/01184da1-9e23-443f-9035-5c805eee34c8
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateAccepted'
+              example:
+                id: 01184da1-9e23-443f-9035-5c805eee34c8
+          links:
+            ReadUpdate:
+              operationId: getUpdate
+              parameters:
+                id: '$response.body#/id'
+              description: Прочитать созданную джобу по её ID.
+        '400':
+          description: |
+            invalid_request — тело не удалось декодировать, есть неизвестные поля,
+            лишние данные или превышен лимит размера. invalid_pair — неверная
+            или отсутствующая пара. same_currency — одинаковые валюты.
+            unsupported_currency — код не входит в настроенный список.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                invalidRequest:
+                  value:
+                    error:
+                      code: invalid_request
+                      message: 'request body must be JSON like {"pair":"EUR/MXN"}'
+                invalidPair:
+                  value:
+                    error:
+                      code: invalid_pair
+                      message: 'invalid pair, expected BASE/QUOTE: "EURMXN"'
+                sameCurrency:
+                  value:
+                    error:
+                      code: same_currency
+                      message: 'base and quote must differ: EUR/EUR'
+                unsupportedCurrency:
+                  summary: При дефолтном списке CURRENCIES.
+                  value:
+                    error:
+                      code: unsupported_currency
+                      message: 'unsupported currency: JPY'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/quotes/updates/{id}:
+    get:
+      tags: [updates]
+      operationId: getUpdate
+      summary: Получить состояние и результат джобы
+      description: |
+        Для найденной джобы HTTP-статус всегда 200; бизнес-результат указан в status.
+        pending — ожидание первой или следующей попытки, processing — выполнение,
+        done — успех, failed — окончательная ошибка.
+
+        Цена и время включаются только для done. При pending после временной
+        ошибки поле error содержит причину предыдущей попытки; это ещё не отказ
+        всей джобы. При следующем захвате воркер очищает эту причину.
+        Поле provider опускается, если его значение пусто.
+      parameters:
+        - $ref: '#/components/parameters/UpdateID'
+      responses:
+        '200':
+          description: Джоба найдена; форма ответа зависит от status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Update'
+              examples:
+                pending:
+                  summary: Ожидает первой попытки.
+                  value:
+                    id: 01184da1-9e23-443f-9035-5c805eee34c8
+                    pair: EUR/MXN
+                    status: pending
+                retryPending:
+                  summary: Временная ошибка; следующая попытка ещё предстоит.
+                  value:
+                    id: 01184da1-9e23-443f-9035-5c805eee34c8
+                    pair: EUR/MXN
+                    status: pending
+                    error: 'frankfurter: HTTP 503: Service Unavailable'
+                processing:
+                  summary: Взята воркером.
+                  value:
+                    id: 01184da1-9e23-443f-9035-5c805eee34c8
+                    pair: EUR/MXN
+                    status: processing
+                done:
+                  summary: Котировка получена и сохранена.
+                  value:
+                    id: 01184da1-9e23-443f-9035-5c805eee34c8
+                    pair: EUR/MXN
+                    status: done
+                    price: '20.893'
+                    provider: frankfurter
+                    updated_at: '2026-11-03T17:43:37.186709Z'
+                failed:
+                  summary: Постоянная ошибка; повторов не будет.
+                  value:
+                    id: 01184da1-9e23-443f-9035-5c805eee34c8
+                    pair: EUR/MXN
+                    status: failed
+                    error: 'frankfurter: HTTP 404: Not Found'
+        '400':
+          description: invalid_id — ID не является UUID из 36 символов с дефисами.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                error:
+                  code: invalid_id
+                  message: 'invalid id: "hello"'
+        '404':
+          description: not_found — UUID корректен, но такой джобы нет.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                error:
+                  code: not_found
+                  message: not found
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/quotes/latest:
+    get:
+      tags: [quotes]
+      operationId: getLatestQuote
+      summary: Получить последнюю успешную котировку пары
+      description: |
+        Выбирает последнюю done-запись по времени сохранения результата.
+        Более новые pending, processing и failed не скрывают предыдущий успех.
+        Если успехов ещё нет, возвращает 404 и не создаёт обновление автоматически.
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          description: |
+            Пара BASE/QUOTE. Регистр не важен, пробелы вокруг кодов убираются.
+            Слэш в query можно передать как %2F, например pair=EUR%2FMXN.
+          schema:
+            $ref: '#/components/schemas/InputPair'
+      responses:
+        '200':
+          description: Последняя успешно сохранённая котировка.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quote'
+              example:
+                pair: EUR/MXN
+                price: '20.893'
+                provider: frankfurter
+                updated_at: '2026-11-03T17:43:37.186709Z'
+        '400':
+          description: invalid_pair, same_currency или unsupported_currency.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                missingPair:
+                  value:
+                    error:
+                      code: invalid_pair
+                      message: 'invalid pair, expected BASE/QUOTE: ""'
+                sameCurrency:
+                  value:
+                    error:
+                      code: same_currency
+                      message: 'base and quote must differ: EUR/EUR'
+                unsupportedCurrency:
+                  summary: При дефолтном списке CURRENCIES.
+                  value:
+                    error:
+                      code: unsupported_currency
+                      message: 'unsupported currency: JPY'
+        '404':
+          description: not_found — по этой паре ещё нет успешной котировки.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                error:
+                  code: not_found
+                  message: not found
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  parameters:
+    UpdateID:
+      name: id
+      in: path
+      required: true
+      description: UUID из ответа создания джобы; допускаются оба регистра hex-символов.
+      schema:
+        $ref: '#/components/schemas/UUID'
+  schemas:
+    UUID:
+      type: string
+      description: |
+        Идентификатор запроса обновления. Возвращается при создании джобы
+        и используется для чтения её состояния и результата.
+      format: uuid
+      minLength: 36
+      maxLength: 36
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      example: 01184da1-9e23-443f-9035-5c805eee34c8
+    InputPair:
+      type: string
+      minLength: 1
+      description: |
+        Два различных разрешённых кода через слэш. Регистр не важен, пробелы
+        вокруг кодов убираются. Допустимые валюты задаются CURRENCIES.
+      example: EUR/MXN
+    Pair:
+      type: string
+      pattern: '^[A-Z]{3}/[A-Z]{3}$'
+      description: Нормализованная пара; цена одной BASE выражена в QUOTE.
+      example: EUR/MXN
+    Price:
+      type: string
+      pattern: '^(0\.[0-9]{0,9}[1-9]|[1-9][0-9]{0,13}(\.[0-9]{0,9}[1-9])?)$'
+      description: |
+        Положительная десятичная строка после округления до 10 знаков.
+        Меньше 10^14; незначащие нули в конце дробной части опускаются.
+      example: '20.893'
+    UpdateRequest:
+      type: object
+      description: |
+        Тело POST /api/v1/quotes/updates. Содержит пару валют,
+        курс которой клиент просит обновить в фоне.
+      additionalProperties: false
+      required: [pair]
+      properties:
+        pair:
+          $ref: '#/components/schemas/InputPair'
+    UpdateAccepted:
+      type: object
+      description: |
+        Ответ 202 на создание джобы. Содержит её ID, по которому можно
+        проверить результат. Адрес чтения также передаётся в заголовке Location.
+      additionalProperties: false
+      required: [id]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+    Update:
+      description: |
+        Ответ GET /api/v1/quotes/updates/{id}. Поле status определяет
+        один из четырёх вариантов ответа ниже. Для найденной джобы
+        любой из этих вариантов возвращается с HTTP 200.
+      oneOf:
+        - $ref: '#/components/schemas/PendingUpdate'
+        - $ref: '#/components/schemas/ProcessingUpdate'
+        - $ref: '#/components/schemas/CompletedUpdate'
+        - $ref: '#/components/schemas/FailedUpdate'
+      discriminator:
+        propertyName: status
+        mapping:
+          pending: '#/components/schemas/PendingUpdate'
+          processing: '#/components/schemas/ProcessingUpdate'
+          done: '#/components/schemas/CompletedUpdate'
+          failed: '#/components/schemas/FailedUpdate'
+    PendingUpdate:
+      type: object
+      description: |
+        Джоба ожидает первой либо повторной попытки. Цены пока нет.
+        При ожидании повтора поле error может содержать причину прошлой ошибки.
+      additionalProperties: false
+      required: [id, pair, status]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        pair:
+          $ref: '#/components/schemas/Pair'
+        status:
+          type: string
+          enum: [pending]
+        error:
+          type: string
+          minLength: 1
+          description: Причина прошлой попытки, если джоба ожидает retry.
+    ProcessingUpdate:
+      type: object
+      description: |
+        Воркер захватил джобу и выполняет попытку получения курса.
+        Цена и время успешного обновления ещё не возвращаются.
+      additionalProperties: false
+      required: [id, pair, status]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        pair:
+          $ref: '#/components/schemas/Pair'
+        status:
+          type: string
+          enum: [processing]
+    CompletedUpdate:
+      type: object
+      description: |
+        Успешный результат джобы: курс получен и сохранён.
+        Содержит цену и время сохранения; provider указывает источник,
+        если его имя заполнено.
+      additionalProperties: false
+      required: [id, pair, status, price, updated_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        pair:
+          $ref: '#/components/schemas/Pair'
+        status:
+          type: string
+          enum: [done]
+        price:
+          $ref: '#/components/schemas/Price'
+        provider:
+          type: string
+          minLength: 1
+          example: frankfurter
+        updated_at:
+          type: string
+          format: date-time
+          description: Время успешного сохранения нашей копии котировки, UTC.
+    FailedUpdate:
+      type: object
+      description: |
+        Джоба окончательно завершена с ошибкой. В error указана причина:
+        постоянная ошибка либо исчерпание попыток. Цены в таком ответе нет.
+      additionalProperties: false
+      required: [id, pair, status, error]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        pair:
+          $ref: '#/components/schemas/Pair'
+        status:
+          type: string
+          enum: [failed]
+        error:
+          type: string
+          minLength: 1
+          description: Причина окончательной ошибки.
+    Quote:
+      type: object
+      description: |
+        Ответ GET /api/v1/quotes/latest. Последний успешно сохранённый
+        курс пары с ценой и временем сохранения. Новые незавершённые
+        или неуспешные джобы эту котировку не заменяют.
+      additionalProperties: false
+      required: [pair, price, updated_at]
+      properties:
+        pair:
+          $ref: '#/components/schemas/Pair'
+        price:
+          $ref: '#/components/schemas/Price'
+        provider:
+          type: string
+          minLength: 1
+          example: frankfurter
+        updated_at:
+          type: string
+          format: date-time
+          description: Время успешного сохранения нашей копии котировки, UTC.
+    ApiError:
+      type: object
+      description: |
+        Ошибка HTTP-ручки. Объект error содержит машинный code и текстовый message.
+        В ответе о состоянии джобы поле error имеет другой вид: это строка
+        с причиной ошибки получения курса, а не данный объект.
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - invalid_pair
+                - same_currency
+                - unsupported_currency
+                - invalid_id
+                - not_found
+                - internal_error
+            message:
+              type: string
+  responses:
+    InternalError:
+      description: Внутренняя ошибка API; подробности остаются в логе.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            error:
+              code: internal_error
+              message: internal error
+    MethodNotAllowed:
+      description: Неподдерживаемый для этого пути HTTP-метод; ответ Go ServeMux.
+      headers:
+        Allow:
+          description: Разрешённые методы; для GET-маршрутов также включает HEAD.
+          schema:
+            type: string
+            example: GET, HEAD
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "Method Not Allowed\n"
