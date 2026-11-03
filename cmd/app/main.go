@@ -1,11 +1,11 @@
-// Команда app запускает сервис котировок: HTTP API и работу с базой.
+// Команда app запускает HTTP API и фоновый воркер в одном процессе.
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,8 +14,10 @@ import (
 
 	"github.com/1lnazis/Test-Assignment/internal/config"
 	"github.com/1lnazis/Test-Assignment/internal/httpapi"
+	"github.com/1lnazis/Test-Assignment/internal/provider/frankfurter"
 	"github.com/1lnazis/Test-Assignment/internal/service"
 	"github.com/1lnazis/Test-Assignment/internal/storage/postgres"
+	"github.com/1lnazis/Test-Assignment/internal/worker"
 )
 
 func main() {
@@ -25,18 +27,14 @@ func main() {
 	}
 }
 
-// run собирает приложение и ждёт сигнала остановки. Вынесена из main, чтобы
-// можно было вернуть ошибку, а defer при этом отработали до os.Exit.
+// run собирает зависимости. Возврат ошибки позволяет defer отработать до os.Exit.
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(log)
-
-	// ctx отменяется по Ctrl+C или SIGTERM (так останавливает контейнер Docker).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -44,42 +42,32 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-
+	defer pool.Close() // runServices сначала дожидается HTTP и воркера.
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		return err
 	}
-
-	svc := service.New(postgres.NewRepo(pool), cfg.Currencies)
+	repo := postgres.NewRepo(pool)
+	provider, err := frankfurter.New(frankfurter.DefaultBaseURL, cfg.Worker.FetchTimeout)
+	if err != nil {
+		return err
+	}
+	background, err := worker.New(repo, provider, log, cfg.Worker)
+	if err != nil {
+		return err
+	}
+	svc := service.New(repo, cfg.Currencies)
 	srv := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: httpapi.New(svc, log).Routes(),
-		// Таймауты защищают от медленных клиентов, которые держат соединения открытыми.
+		Addr: cfg.HTTPAddr, Handler: httpapi.New(svc, log).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadTimeout:       10 * time.Second, WriteTimeout: 10 * time.Second,
+		IdleTimeout: 60 * time.Second,
 	}
-
-	serverErr := make(chan error, 1)
-	go func() {
-		log.Info("http server started", "addr", cfg.HTTPAddr)
-		serverErr <- srv.ListenAndServe()
-	}()
-
-	select {
-	case err := <-serverErr:
-		// Сюда попадаем, только если сервер упал сам, например порт уже занят.
-		return fmt.Errorf("http server: %w", err)
-	case <-ctx.Done():
-		log.Info("shutting down")
+	// Проверяем порт до запуска обработчиков: при занятом порте джобы не захватываем.
+	listener, err := net.Listen("tcp", cfg.HTTPAddr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
 	}
-
-	// Даём уже принятым запросам время завершиться, новые не принимаем.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("shutdown: %w", err)
-	}
-	return nil
+	defer listener.Close()
+	log.Info("service started", "addr", listener.Addr().String(), "workers", cfg.Worker.Count)
+	return runServices(ctx, srv, listener, background, cfg.ShutdownTimeout, log)
 }

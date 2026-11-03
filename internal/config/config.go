@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/1lnazis/Test-Assignment/internal/domain"
+	"github.com/1lnazis/Test-Assignment/internal/worker"
 )
 
 // Config — все настройки сервиса.
@@ -20,7 +23,9 @@ type Config struct {
 	// Currencies — набор валют, которые принимает сервис.
 	Currencies domain.Currencies
 	// LogLevel — минимальный уровень сообщений, которые пишет логгер.
-	LogLevel slog.Level
+	LogLevel        slog.Level
+	Worker          worker.Options
+	ShutdownTimeout time.Duration
 }
 
 const (
@@ -50,6 +55,17 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("LOG_LEVEL: %w", err)
 	}
 
+	cfg.Worker, err = loadWorkerOptions()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ShutdownTimeout, err = durationEnv("SHUTDOWN_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.ShutdownTimeout <= cfg.Worker.DBTimeout {
+		return Config{}, errors.New("SHUTDOWN_TIMEOUT must exceed DB_TIMEOUT")
+	}
 	return cfg, nil
 }
 
@@ -79,4 +95,55 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func loadWorkerOptions() (worker.Options, error) {
+	opts := worker.DefaultOptions()
+	for _, item := range []struct {
+		key string
+		dst *int
+	}{
+		{"WORKER_COUNT", &opts.Count}, {"MAX_ATTEMPTS", &opts.MaxAttempts},
+	} {
+		if raw := os.Getenv(item.key); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				return worker.Options{}, fmt.Errorf("%s: %w", item.key, err)
+			}
+			*item.dst = value
+		}
+	}
+	for _, item := range []struct {
+		key string
+		dst *time.Duration
+	}{
+		{"POLL_INTERVAL", &opts.PollInterval},
+		{"RETRY_BASE_DELAY", &opts.RetryBaseDelay},
+		{"RETRY_MAX_DELAY", &opts.RetryMaxDelay},
+		{"QUOTE_TIMEOUT", &opts.FetchTimeout},
+		{"DB_TIMEOUT", &opts.DBTimeout},
+		{"LEASE_DURATION", &opts.Lease},
+	} {
+		value, err := durationEnv(item.key, *item.dst)
+		if err != nil {
+			return worker.Options{}, err
+		}
+		*item.dst = value
+	}
+	if err := opts.Validate(); err != nil {
+		return worker.Options{}, fmt.Errorf("worker config: %w", err)
+	}
+	return opts, nil
+}
+
+func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return value, nil
 }

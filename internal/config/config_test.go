@@ -1,8 +1,10 @@
 package config
 
 import (
+	"github.com/1lnazis/Test-Assignment/internal/worker"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
@@ -10,7 +12,7 @@ import (
 // clearEnv обнуляет все переменные, которые читает Load, чтобы тесты не зависели от окружения компьютера.
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"HTTP_ADDR", "DATABASE_URL", "CURRENCIES", "LOG_LEVEL"} {
+	for _, k := range []string{"HTTP_ADDR", "DATABASE_URL", "CURRENCIES", "LOG_LEVEL", "WORKER_COUNT", "MAX_ATTEMPTS", "POLL_INTERVAL", "RETRY_BASE_DELAY", "RETRY_MAX_DELAY", "QUOTE_TIMEOUT", "DB_TIMEOUT", "LEASE_DURATION", "SHUTDOWN_TIMEOUT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -34,6 +36,9 @@ func TestLoad_Defaults(t *testing.T) {
 		if !cfg.Currencies.Has(c) {
 			t.Errorf("default currencies miss %s", c)
 		}
+	}
+	if cfg.Worker != worker.DefaultOptions() || cfg.ShutdownTimeout != 10*time.Second {
+		t.Errorf("worker defaults: %+v shutdown %v", cfg.Worker, cfg.ShutdownTimeout)
 	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want info", cfg.LogLevel)
