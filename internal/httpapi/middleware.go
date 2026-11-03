@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// statusWriter запоминает код ответа, чтобы его можно было записать в лог.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -17,7 +16,6 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// logRequests пишет в лог метод, путь, код ответа и длительность каждого запроса.
 func (h *Handler) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -32,7 +30,6 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 	})
 }
 
-// recoverer не даёт панике в обработчике уронить весь сервис: отвечает 500 и пишет в лог.
 func (h *Handler) recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

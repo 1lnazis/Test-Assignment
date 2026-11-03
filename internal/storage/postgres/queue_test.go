@@ -36,7 +36,7 @@ func TestRepo_ClaimNext_InvalidOptions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Проверка аргументов должна происходить до обращения к базе.
+
 			_, found, err := NewRepo(nil).ClaimNext(context.Background(), tc.max, tc.lease)
 			if err == nil || found {
 				t.Fatalf("ClaimNext = found %v, error %v; want validation error", found, err)
@@ -193,7 +193,7 @@ func TestRepo_ClaimNext_ReclaimsExpiredLease(t *testing.T) {
 	if err != nil || !found || first.Attempts != 2 {
 		t.Fatalf("first reclaim: job %+v, found %v, error %v", first, found, err)
 	}
-	// Истечение задаём в БД: тесту не нужны ожидания и короткие ненадёжные lease.
+
 	queueExec(t, pool, `UPDATE quote_updates SET locked_until = now() - interval '1 minute' WHERE id = $1`, first.ID)
 	second, found, err := repo.ClaimNext(context.Background(), 3, time.Hour)
 	if err != nil || !found || second.ID != first.ID || second.Attempts != first.Attempts+1 {
@@ -215,7 +215,7 @@ func TestRepo_ClaimNext_ExhaustedOnlyPersistsFailure(t *testing.T) {
 	if _, found, err := NewRepo(pool).ClaimNext(context.Background(), 3, time.Hour); err != nil || found {
 		t.Fatalf("exhausted queue: found %v, error %v", found, err)
 	}
-	// Отдельный запрос видит зафиксированную очистку, даже когда ClaimNext вернул false.
+
 	var failed, totalAttempts int
 	if err := pool.QueryRow(context.Background(), `
 		SELECT count(*), COALESCE(sum(attempts), 0) FROM quote_updates

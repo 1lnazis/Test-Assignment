@@ -1,4 +1,3 @@
-// Package postgres — хранилище на Postgres: подключение, миграции и репозиторий.
 package postgres
 
 import (
@@ -12,11 +11,8 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// migrationLockID — произвольное число для advisory-блокировки: она не даёт
-// двум экземплярам сервиса применять миграции одновременно.
 const migrationLockID = 727001
 
-// NewPool открывает пул соединений и проверяет, что база отвечает.
 func NewPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -29,14 +25,12 @@ func NewPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// Migrate применяет по порядку все ещё не применённые миграции из папки migrations.
-// Применённые версии записываются в таблицу schema_migrations, повторный запуск безопасен.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("read migrations: %w", err)
 	}
-	// ReadDir возвращает файлы, отсортированные по имени, поэтому 001 идёт раньше 002.
+
 	for _, e := range entries {
 		if err := applyMigration(ctx, pool, e.Name()); err != nil {
 			return fmt.Errorf("migration %s: %w", e.Name(), err)
@@ -45,8 +39,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// applyMigration применяет один файл в отдельной транзакции: либо миграция
-// применилась целиком и записана в schema_migrations, либо не изменилось ничего.
 func applyMigration(ctx context.Context, pool *pgxpool.Pool, name string) error {
 	script, err := migrationsFS.ReadFile("migrations/" + name)
 	if err != nil {
@@ -57,11 +49,9 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, name string) error 
 	if err != nil {
 		return err
 	}
-	// После успешного Commit откат ничего не делает.
+
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Блокировка держится до конца транзакции. Второй экземпляр сервиса подождёт
-	// здесь, а потом увидит, что миграция уже применена, и пропустит её.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLockID); err != nil {
 		return err
 	}

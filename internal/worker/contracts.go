@@ -1,4 +1,3 @@
-// Package worker описывает обработку фоновых джоб котировок.
 package worker
 
 import (
@@ -9,8 +8,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Job — данные, которые воркер получает после захвата джобы.
-// Attempts — номер выданной попытки и токен для защиты последующей записи.
 type Job struct {
 	ID          string
 	Pair        domain.Pair
@@ -18,10 +15,6 @@ type Job struct {
 	LockedUntil time.Time
 }
 
-// Queue объявляется потребителем — пакетом воркера.
-// В ClaimNext found=false без ошибки означает отсутствие доступной работы.
-// В Complete/Retry/Fail saved=false без ошибки означает, что запись не принадлежит
-// попытке либо уже не находится в processing. Реализации должны учитывать контекст.
 type Queue interface {
 	ClaimNext(ctx context.Context, maxAttempts int, lease time.Duration) (job Job, found bool, err error)
 	Complete(ctx context.Context, job Job, price decimal.Decimal, provider string) (saved bool, err error)
@@ -29,7 +22,6 @@ type Queue interface {
 	Fail(ctx context.Context, job Job, reason string) (saved bool, err error)
 }
 
-// Quoter — операции, которые воркеру нужны от клиента провайдера.
 type Quoter interface {
 	Fetch(ctx context.Context, pair domain.Pair) (decimal.Decimal, error)
 	Name() string

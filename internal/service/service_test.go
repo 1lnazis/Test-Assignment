@@ -10,7 +10,6 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// fakeRepo — заглушка хранилища для тестов.
 type fakeRepo struct {
 	created []domain.Pair
 	updates map[string]domain.Update

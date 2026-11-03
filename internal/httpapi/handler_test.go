@@ -18,7 +18,6 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// fakeService — заглушка сервиса: каждый тест задаёт нужное поведение функцией.
 type fakeService struct {
 	requestUpdate func(ctx context.Context, rawPair string) (domain.Update, error)
 	getUpdate     func(ctx context.Context, id string) (domain.Update, error)
@@ -264,7 +263,7 @@ func TestLatestQuote_NotFound(t *testing.T) {
 }
 
 func TestLatestQuote_MissingPairParam(t *testing.T) {
-	// Пустой pair доходит до сервиса, и тот отвечает ErrInvalidPair.
+
 	svc := fakeService{latestQuote: func(_ context.Context, p string) (domain.Quote, error) {
 		if p != "" {
 			t.Fatalf("pair = %q, want empty", p)

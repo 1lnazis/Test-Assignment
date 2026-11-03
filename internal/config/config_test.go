@@ -9,7 +9,6 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// clearEnv обнуляет все переменные, которые читает Load, чтобы тесты не зависели от окружения компьютера.
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"HTTP_ADDR", "DATABASE_URL", "CURRENCIES", "LOG_LEVEL", "WORKER_COUNT", "MAX_ATTEMPTS", "POLL_INTERVAL", "RETRY_BASE_DELAY", "RETRY_MAX_DELAY", "QUOTE_TIMEOUT", "DB_TIMEOUT", "LEASE_DURATION", "SHUTDOWN_TIMEOUT"} {
