@@ -31,7 +31,7 @@ func TestRepo_Complete_InvalidInput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Некорректные данные отклоняются до обращения к БД.
+
 			saved, err := NewRepo(nil).Complete(context.Background(), worker.Job{Attempts: tc.attempts}, price, "test")
 			if err == nil || saved {
 				t.Fatalf("Complete = saved %v, error %v; want validation error", saved, err)
@@ -139,7 +139,7 @@ func TestRepo_Complete_ExpiredLeaseWithoutTakeover(t *testing.T) {
 		t.Fatalf("claim: found %v, error %v", found, err)
 	}
 	queueExec(t, pool, `UPDATE quote_updates SET locked_until = now() - interval '1 minute' WHERE id = $1`, job.ID)
-	// Никто ещё не перезахватил запись: номер попытки остаётся действующим.
+
 	if saved, err := repo.Complete(ctx, job, decimal.NewFromInt(21), "test"); err != nil || !saved {
 		t.Fatalf("late result without takeover: saved %v, error %v", saved, err)
 	}

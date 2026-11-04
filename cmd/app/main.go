@@ -1,4 +1,3 @@
-// Команда app запускает HTTP API и фоновый воркер в одном процессе.
 package main
 
 import (
@@ -27,7 +26,6 @@ func main() {
 	}
 }
 
-// run собирает зависимости. Возврат ошибки позволяет defer отработать до os.Exit.
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -42,7 +40,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer pool.Close() // runServices сначала дожидается HTTP и воркера.
+	defer pool.Close()
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		return err
 	}
@@ -62,7 +60,7 @@ func run() error {
 		ReadTimeout:       10 * time.Second, WriteTimeout: 10 * time.Second,
 		IdleTimeout: 60 * time.Second,
 	}
-	// Проверяем порт до запуска обработчиков: при занятом порте джобы не захватываем.
+
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)

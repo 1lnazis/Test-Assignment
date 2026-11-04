@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// Options задаёт число обработчиков, таймауты и политику повторных попыток.
 type Options struct {
 	Count          int
 	MaxAttempts    int
@@ -38,7 +37,7 @@ func (o Options) Validate() error {
 	if o.RetryBaseDelay < time.Microsecond || o.RetryMaxDelay < o.RetryBaseDelay {
 		return fmt.Errorf("retry delays must be at least one microsecond and max must be >= base")
 	}
-	// Аренда покрывает захват, Fetch и сохранение. Проверяем переполнение Duration.
+
 	minimum := o.FetchTimeout + o.DBTimeout
 	if minimum < o.FetchTimeout {
 		return fmt.Errorf("worker timeout sum overflows")

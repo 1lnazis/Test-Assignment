@@ -1,4 +1,3 @@
-// Package httpapi — HTTP-слой: разбор запросов, вызов сервиса и формирование JSON-ответов.
 package httpapi
 
 import (
@@ -13,37 +12,29 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// maxBodyBytes — предел размера тела запроса. Нужная нам структура крошечная,
-// всё сверх этого — мусор или попытка забить память.
 const maxBodyBytes = 1 << 10
 
-// Service — то, что HTTP-слою нужно от бизнес-логики.
 type Service interface {
 	RequestUpdate(ctx context.Context, rawPair string) (domain.Update, error)
 	GetUpdate(ctx context.Context, id string) (domain.Update, error)
 	LatestQuote(ctx context.Context, rawPair string) (domain.Quote, error)
 }
 
-// Handler обслуживает HTTP API.
 type Handler struct {
 	svc Service
 	log *slog.Logger
 }
 
-// New создаёт обработчик API.
 func New(svc Service, log *slog.Logger) *Handler {
 	return &Handler{svc: svc, log: log}
 }
 
-// Routes возвращает готовый http.Handler со всеми маршрутами и middleware.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/quotes/updates", h.requestUpdate)
 	mux.HandleFunc("GET /api/v1/quotes/updates/{id}", h.getUpdate)
 	mux.HandleFunc("GET /api/v1/quotes/latest", h.latestQuote)
 
-	// Порядок важен: recoverer стоит внутри logRequests, поэтому
-	// ответ 500 после паники тоже попадёт в лог запросов.
 	return h.logRequests(h.recoverer(mux))
 }
 
@@ -55,8 +46,6 @@ type requestUpdateResponse struct {
 	ID string `json:"id"`
 }
 
-// requestUpdate — POST /api/v1/quotes/updates. Только ставит запрос в очередь
-// и сразу отвечает, а обновление выполнит фоновый воркер.
 func (h *Handler) requestUpdate(w http.ResponseWriter, r *http.Request) {
 	var body requestUpdateBody
 	if err := decodeJSON(w, r, &body); err != nil {
@@ -84,7 +73,6 @@ type updateResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
-// getUpdate — GET /api/v1/quotes/updates/{id}. Цена и время есть только у выполненного запроса.
 func (h *Handler) getUpdate(w http.ResponseWriter, r *http.Request) {
 	u, err := h.svc.GetUpdate(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -115,8 +103,6 @@ type quoteResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// latestQuote — GET /api/v1/quotes/latest?pair=EUR/MXN.
-// Пара передаётся в query, потому что слэш в EUR/MXN ломает разбор пути.
 func (h *Handler) latestQuote(w http.ResponseWriter, r *http.Request) {
 	q, err := h.svc.LatestQuote(r.Context(), r.URL.Query().Get("pair"))
 	if err != nil {
@@ -131,9 +117,6 @@ func (h *Handler) latestQuote(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleError превращает ошибку сервиса в HTTP-ответ. Ошибки пользователя
-// (400, 404) показываем как есть, а про внутренние пишем в лог и отвечаем
-// общим текстом, чтобы не раскрывать детали.
 func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidPair):
@@ -152,7 +135,6 @@ func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error)
 	}
 }
 
-// decodeJSON читает тело запроса в v: ограничивает размер и не пропускает неизвестные поля.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
@@ -190,6 +172,6 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Заголовки уже отправлены, поэтому ошибку записи сделать нечем: клиент ушёл.
+
 	_ = json.NewEncoder(w).Encode(v)
 }

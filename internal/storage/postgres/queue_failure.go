@@ -9,8 +9,6 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/worker"
 )
 
-// Retry планирует следующую попытку по часам БД. Attempts здесь не растёт:
-// увеличение произойдёт при следующем ClaimNext. Нулевой delay допускается.
 func (r *Repo) Retry(ctx context.Context, job worker.Job, reason string, delay time.Duration) (bool, error) {
 	if err := validateFailure(job, reason); err != nil {
 		return false, err
@@ -35,7 +33,6 @@ func (r *Repo) Retry(ctx context.Context, job worker.Job, reason string, delay t
 	return tag.RowsAffected() == 1, nil
 }
 
-// Fail завершает текущую попытку окончательной ошибкой.
 func (r *Repo) Fail(ctx context.Context, job worker.Job, reason string) (bool, error) {
 	if err := validateFailure(job, reason); err != nil {
 		return false, err

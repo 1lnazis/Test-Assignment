@@ -12,18 +12,12 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/worker"
 )
 
-// Не обновляем неограниченное число исчерпавших попытки строк в одном захвате.
 const reapBatchSize = 100
 
 var _ worker.Queue = (*Repo)(nil)
 
-// ClaimNext выдаёт одну готовую джобу и сохраняет начало её попытки.
-// Pending готова по next_attempt_at; processing — после окончания аренды.
-// В том же SQL до 100 исчерпавших попытки джоб переводятся в failed.
-// Метод использует один autocommit-запрос; HTTP-вызов выполняется уже после него.
 func (r *Repo) ClaimNext(ctx context.Context, maxAttempts int, lease time.Duration) (worker.Job, bool, error) {
-	// attempts хранится в PostgreSQL integer. Нулевая после округления аренда
-	// позволила бы следующему воркеру немедленно перезахватить ту же запись.
+
 	if maxAttempts <= 0 || int64(maxAttempts) > 1<<31-1 {
 		return worker.Job{}, false, fmt.Errorf("claim next: max attempts must fit a positive PostgreSQL integer")
 	}
@@ -84,7 +78,7 @@ func (r *Repo) ClaimNext(ctx context.Context, maxAttempts int, lease time.Durati
 	err := r.pool.QueryRow(ctx, q, maxAttempts, lease.Microseconds(), reapBatchSize).
 		Scan(&job.ID, &base, &quote, &job.Attempts, &job.LockedUntil)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// В autocommit reaped сохраняется и при отсутствии выдаваемой джобы.
+
 		return worker.Job{}, false, nil
 	}
 	if err != nil {

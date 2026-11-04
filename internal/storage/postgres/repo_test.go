@@ -14,9 +14,6 @@ import (
 	"github.com/1lnazis/Test-Assignment/internal/domain"
 )
 
-// newTestPool возвращает пул, привязанный к отдельной схеме, которая создаётся
-// под тест и удаляется после него, поэтому тесты не мешают друг другу и данным в базе.
-// Без TEST_DATABASE_URL интеграционные тесты пропускаются.
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool := newTestPoolBeforeMigrations(t)
@@ -26,7 +23,6 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// newTestPoolBeforeMigrations создаёт изолированную схему для проверки обновления БД.
 func newTestPoolBeforeMigrations(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -78,7 +74,6 @@ func TestMigrate_Idempotent(t *testing.T) {
 		t.Fatal("newTestPool did not apply migrations")
 	}
 
-	// newTestPool уже применил миграции, повторный запуск ничего не должен ломать.
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
@@ -132,7 +127,6 @@ func TestRepo_LatestQuote(t *testing.T) {
 	ctx := context.Background()
 	pair := domain.Pair{Base: "EUR", Quote: "MXN"}
 
-	// Пока выполненных запросов нет, а pending-запрос не считается.
 	if _, err := repo.CreateUpdate(ctx, pair); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +164,6 @@ func TestRepo_LatestQuote(t *testing.T) {
 func TestRepo_DoneRowRequiresPrice(t *testing.T) {
 	pool := newTestPool(t)
 
-	// Ограничение в таблице не даёт сохранить выполненный запрос без цены.
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO quote_updates (base, quote, status) VALUES ('EUR', 'MXN', 'done')`)
 	if err == nil {

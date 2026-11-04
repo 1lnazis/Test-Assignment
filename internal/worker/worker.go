@@ -13,7 +13,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Worker запускает Count обработчиков. Зависимости должны учитывать контекст.
 type Worker struct {
 	queue  Queue
 	quoter Quoter
@@ -32,8 +31,6 @@ func New(queue Queue, quoter Quoter, log *slog.Logger, opts Options) (*Worker, e
 	return &Worker{queue: queue, quoter: quoter, log: log, opts: opts, wait: waitContext}, nil
 }
 
-// Run возвращается после остановки всех обработчиков. Ошибка сохранения
-// результата отменяет остальные обработчики и передаётся в main.
 func (w *Worker) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -69,8 +66,6 @@ func (w *Worker) loop(ctx context.Context, slot int) error {
 	return nil
 }
 
-// Recover оборачивает одну итерацию: после паники цикл продолжится,
-// а уже захваченная джоба вернётся в очередь по истечении аренды.
 func (w *Worker) step(ctx context.Context, slot int) (worked bool, err error) {
 	var job Job
 	defer func() {
@@ -90,7 +85,7 @@ func (w *Worker) step(ctx context.Context, slot int) (worked bool, err error) {
 		if ctx.Err() == nil {
 			w.log.Error("claim failed", "worker", slot, "error", err)
 		}
-		return false, nil // Пауза и повтор, пул восстановит соединения с БД.
+		return false, nil
 	}
 	if !found {
 		return false, nil
@@ -109,14 +104,14 @@ func (w *Worker) step(ctx context.Context, slot int) (worked bool, err error) {
 		if !rounded.IsPositive() || rounded.GreaterThanOrEqual(decimal.New(1, 14)) {
 			fetchErr = fmt.Errorf("provider price does not fit positive numeric(24,10)")
 		} else {
-			// Цена уже получена: отмена приложения не должна мешать короткому сохранению.
+
 			return true, w.persist(ctx, job, "complete", true, func(saveCtx context.Context) (bool, error) {
 				return w.queue.Complete(saveCtx, job, price, w.quoter.Name())
 			})
 		}
 	}
 	if ctx.Err() != nil {
-		return true, nil // Остановка приложения не является ошибкой котировки.
+		return true, nil
 	}
 	if job.Attempts < w.opts.MaxAttempts && isRetryable(fetchErr) {
 		return true, w.persist(ctx, job, "retry", false, func(saveCtx context.Context) (bool, error) {
