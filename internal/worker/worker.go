@@ -95,6 +95,11 @@ func (w *Worker) step(ctx context.Context, slot int) (worked bool, err error) {
 		return true, nil
 	}
 
+	started := time.Now()
+	log := w.log.With("worker", slot, "job_id", job.ID,
+		"pair", job.Pair.String(), "attempt", job.Attempts)
+	log.Debug("job claimed")
+
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, w.opts.FetchTimeout)
 	defer cancelFetch()
 	price, fetchErr := w.quoter.Fetch(fetchCtx, job.Pair)
@@ -106,7 +111,13 @@ func (w *Worker) step(ctx context.Context, slot int) (worked bool, err error) {
 		} else {
 
 			return true, w.persist(ctx, job, "complete", true, func(saveCtx context.Context) (bool, error) {
-				return w.queue.Complete(saveCtx, job, price, w.quoter.Name())
+				provider := w.quoter.Name()
+				saved, err := w.queue.Complete(saveCtx, job, price, provider)
+				if err == nil && saved {
+					log.Info("job completed", "provider", provider,
+						"duration_ms", time.Since(started).Milliseconds())
+				}
+				return saved, err
 			})
 		}
 	}
@@ -114,12 +125,23 @@ func (w *Worker) step(ctx context.Context, slot int) (worked bool, err error) {
 		return true, nil
 	}
 	if job.Attempts < w.opts.MaxAttempts && isRetryable(fetchErr) {
+		delay := w.retryDelay(job.Attempts)
 		return true, w.persist(ctx, job, "retry", false, func(saveCtx context.Context) (bool, error) {
-			return w.queue.Retry(saveCtx, job, fetchErr.Error(), w.retryDelay(job.Attempts))
+			saved, err := w.queue.Retry(saveCtx, job, fetchErr.Error(), delay)
+			if err == nil && saved {
+				log.Warn("job retry scheduled", "error", fetchErr,
+					"retry_delay", delay.String(), "duration_ms", time.Since(started).Milliseconds())
+			}
+			return saved, err
 		})
 	}
 	return true, w.persist(ctx, job, "fail", false, func(saveCtx context.Context) (bool, error) {
-		return w.queue.Fail(saveCtx, job, fetchErr.Error())
+		saved, err := w.queue.Fail(saveCtx, job, fetchErr.Error())
+		if err == nil && saved {
+			log.Error("job failed", "error", fetchErr,
+				"duration_ms", time.Since(started).Milliseconds())
+		}
+		return saved, err
 	})
 }
 
